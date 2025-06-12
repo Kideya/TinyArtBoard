@@ -2,58 +2,55 @@ from PIL import Image
 from flask import Flask, render_template, request, redirect, url_for, send_file
 import glob, os
 
-# Ratio of Pixels witdh , height
 size = 10, 10
-# The Array which is storing the R,G,B Values
-led_array = []
-# Filepath for the output
 output_folder = "Arduino/TinyArtBoard"
-# The Name for HTML
 name = "TinyArtBoard"
 
 app = Flask(__name__, template_folder="./static/HTML")
 
-def save_uploaded_file():
-    f = request.files["file"]
+def save_uploaded_file(f):
     f.save("./uploads/upload.jpg")
-    return f
+    return
 
-def crop_range(width, height):
-    """
-        Returns a square crop frame for the image based on the shorter image dimension.
-        This centers and crops the image around its middle area.
-    """
-    middle_x = width / 2
-    middle_y = height / 2
+def image_processing():
+    for infile in glob.glob(os.path.join("uploads", "*.jpg")):
+        file, ext = os.path.splitext(infile)
+        with Image.open(infile) as im:
+            height,width = im.size
+            middle_x = width / 2
+            middle_y = height / 2
 
-    if width > height:
-        left = middle_x - (height / 2)
-        top = 0
-        right = middle_x + (height / 2)
-        bottom = height
-    else:
-        left = 0
-        top = middle_y - (width / 2)
-        right = width
-        bottom = middle_y + (width / 2)
+            if width > height:
+                left = middle_x - (height / 2)
+                top = 0
+                right = middle_x + (height / 2)
+                bottom = height
+            else:
+                left = 0
+                top = middle_y - (width / 2)
+                right = width
+                bottom = middle_y + (width / 2)
+            
+            cropped = im.crop((left,top,right,bottom))
+            pixelatedImage = cropped.resize( size, resample=Image.NEAREST)
+            previewImage = pixelatedImage.resize((2024, 2024), resample=Image.NEAREST)
+            return height , width, pixelatedImage,previewImage,im ,file
 
-    return left, top, right, bottom
+def create_RGB_array(pixelatedImage):
+    led_array = []
+    height,width = size
+    for row in range(width):
+        for col in range(height):
+            r, g, b = pixelatedImage.getpixel((col, row))
+            led_array.extend([r, g, b])
+    return led_array
 
-
-def naming_images(image, sourceWidth, sourceHeight, file):
-    image.save(file + f"(_pixelated) {size}.jpg")
+def save_preview_images(previewImage,file):
+    previewImage.save(file + "_preview.jpg")
     print("Image has been pixelated")
 
 
-def checking_rgb_values(image, imageSize):
-    width, height = imageSize
-    for row in range(width):
-        for col in range(height):
-            r, g, b = image.getpixel((col, row))
-            led_array.extend([r, g, b])
-
-
-def saving_rgb_as_dot_h(led_array, file):
+def saving_rgb_as_textfile(file,led_array):
     if len(led_array) % 3 != 0:
         raise ValueError(
             "Length of Array is missing values (Needs to have an RGB Value for each LED)"
@@ -61,8 +58,9 @@ def saving_rgb_as_dot_h(led_array, file):
 
     os.makedirs(
         output_folder, exist_ok=True
-    )  # Ordner automatisch erstellen, falls nicht vorhanden
+    )  
     file_path = os.path.join(output_folder, "led_colors.h")
+    
     try:
         with open(file_path, "w") as f:
             f.write(f"//Generated from Image: {file} \n")
@@ -81,7 +79,7 @@ def saving_rgb_as_dot_h(led_array, file):
     except Exception as e:
         print(f"Error while saving the file: {e}")
 
-#===========================================================================================
+# ===========================================================================================
 
 # Root of the app
 @app.route("/", methods=["GET", "POST"])
@@ -98,26 +96,15 @@ def file_upload():
     if request.method == "POST":
         f = request.files["file"]
         if f and request.form.get("upload") == "Hochladen":
-            f = request.files["file"]
-            f.save("./uploads/upload.jpg")
             try:
-                for infile in glob.glob(os.path.join("uploads", "*.jpg")):
-                    file, ext = os.path.splitext(infile)
-                    with Image.open(infile) as im:
-                        sourceSizeWidth, sourceSizeHeight = im.size
-                        cropFrame = crop_range(sourceSizeWidth, sourceSizeHeight)
-                        pixelatedImage = im.resize(
-                            size, resample=Image.NEAREST, box=cropFrame
-                        )
-                        checking_rgb_values(im, size)
-                        pixelatedImage = pixelatedImage.resize(
-                            (2024, 2024), resample=Image.NEAREST
-                        )
-                        naming_images(
-                            pixelatedImage, sourceSizeWidth, sourceSizeHeight, file
-                        )
-                        saving_rgb_as_dot_h(led_array, file)
-                        led_array.clear()
+                save_uploaded_file(f)
+                height, width, pixelatedImage, previewImage, im, file = (
+                    image_processing()
+                )
+                led_array = create_RGB_array(pixelatedImage)
+                save_preview_images(previewImage, file)
+                saving_rgb_as_textfile(file,led_array)
+                led_array.clear()
 
             except Exception as e:
                 print(f"Error while saving the file: {e}")
